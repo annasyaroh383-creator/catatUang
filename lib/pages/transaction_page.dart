@@ -1,116 +1,216 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../models/transaction_model.dart';
+import 'package:intl/intl.dart';
 
 class TransactionPage extends StatefulWidget {
-  const TransactionPage({super.key});
+  final Function(Map<String, dynamic>) onSaveTransaction;
+
+  const TransactionPage({
+    super.key,
+    required this.onSaveTransaction,
+  });
 
   @override
   State<TransactionPage> createState() => _TransactionPageState();
 }
 
 class _TransactionPageState extends State<TransactionPage> {
-  final _titleController = TextEditingController();
+  final List<Map<String, dynamic>> _tempTransactions = [];
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
   final _amountController = TextEditingController();
-  String _selectedType = 'income'; // default
+  bool _isIncome = true;
 
-  // 🧠 Fungsi menyimpan transaksi baru ke SharedPreferences
-  Future<void> _saveTransaction() async {
-    if (_titleController.text.isEmpty || _amountController.text.isEmpty) {
+  /// 🔹 Menambahkan transaksi sementara
+  void _addTransaction() {
+    if (_formKey.currentState!.validate()) {
+      final now = DateTime.now();
+      final dateFormat = DateFormat('dd MMM yyyy');
+
+      setState(() {
+        _tempTransactions.add({
+          'name': _nameController.text,
+          'amount': double.tryParse(_amountController.text) ?? 0,
+          'isIncome': _isIncome,
+          'date': dateFormat.format(now),
+        });
+      });
+
+      // Reset form input
+      _nameController.clear();
+      _amountController.clear();
+    }
+  }
+
+  /// 🔹 Simpan transaksi ke storage utama dan kembali ke beranda
+  void _saveAllTransactions() {
+    if (_tempTransactions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lengkapi semua data terlebih dahulu!')),
+        const SnackBar(content: Text('Belum ada transaksi yang ditambahkan')),
       );
       return;
     }
 
-    // 1️⃣ Buat objek transaksi baru
-    final newTransaction = TransactionModel(
-      title: _titleController.text,
-      amount: double.parse(_amountController.text),
-      date: DateTime.now(),
-      type: _selectedType,
-    );
-
-    // 2️⃣ Ambil data lama (jika ada)
-    final prefs = await SharedPreferences.getInstance();
-    final String? storedData = prefs.getString('transactions');
-
-    List<TransactionModel> transactions = [];
-    if (storedData != null) {
-      final List decoded = jsonDecode(storedData);
-      transactions = decoded.map((e) => TransactionModel.fromMap(e)).toList();
+    for (var tx in _tempTransactions) {
+      widget.onSaveTransaction(tx);
     }
 
-    // 3️⃣ Tambah transaksi baru
-    transactions.add(newTransaction);
-
-    // 4️⃣ Simpan kembali ke SharedPreferences
-    final String encoded =
-        jsonEncode(transactions.map((e) => e.toMap()).toList());
-    await prefs.setString('transactions', encoded);
-
-    // 5️⃣ Tampilkan pesan sukses
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Transaksi berhasil disimpan!')),
     );
 
-    // 6️⃣ Kosongkan form
-    _titleController.clear();
-    _amountController.clear();
+    // 🔄 Kembali ke halaman Beranda
+    Future.delayed(const Duration(milliseconds: 500), () {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final formatCurrency =
+        NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ');
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Tambah Transaksi'),
-        centerTitle: true,
+        backgroundColor: Colors.indigo,
+        foregroundColor: Colors.white,
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            TextField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                labelText: 'Nama Transaksi',
-                border: OutlineInputBorder(),
+            // 🔹 Form Input
+            Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nama Transaksi',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Masukkan nama transaksi';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _amountController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Jumlah (Rp)',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Masukkan jumlah';
+                      }
+                      if (double.tryParse(value) == null) {
+                        return 'Masukkan angka yang valid';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 10),
+
+                  // 🔹 Pilihan Jenis Transaksi
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Pemasukan'),
+                        selected: _isIncome,
+                        onSelected: (val) {
+                          setState(() => _isIncome = true);
+                        },
+                        selectedColor: Colors.green.shade200,
+                      ),
+                      const SizedBox(width: 10),
+                      ChoiceChip(
+                        label: const Text('Pengeluaran'),
+                        selected: !_isIncome,
+                        onSelected: (val) {
+                          setState(() => _isIncome = false);
+                        },
+                        selectedColor: Colors.red.shade200,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 🔹 Tombol Tambah Transaksi
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Tambah Transaksi'),
+                    onPressed: _addTransaction,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 20,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _amountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Jumlah (Rp)',
-                border: OutlineInputBorder(),
-              ),
+
+            const SizedBox(height: 20),
+
+            // 🔹 Daftar Transaksi yang baru dimasukkan
+            Expanded(
+              child: _tempTransactions.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Belum ada transaksi ditambahkan',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _tempTransactions.length,
+                      itemBuilder: (context, index) {
+                        final tx = _tempTransactions[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 5),
+                          child: ListTile(
+                            leading: Icon(
+                              tx['isIncome']
+                                  ? Icons.arrow_downward
+                                  : Icons.arrow_upward,
+                              color: tx['isIncome'] ? Colors.green : Colors.red,
+                            ),
+                            title: Text(tx['name']),
+                            subtitle: Text(tx['date']),
+                            trailing: Text(
+                              (tx['isIncome'] ? '+' : '-') +
+                                  formatCurrency.format(tx['amount']),
+                              style: TextStyle(
+                                color:
+                                    tx['isIncome'] ? Colors.green : Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedType,
-              decoration: const InputDecoration(
-                labelText: 'Jenis Transaksi',
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(value: 'income', child: Text('Pemasukan')),
-                DropdownMenuItem(value: 'expense', child: Text('Pengeluaran')),
-              ],
-              onChanged: (value) {
-                setState(() {
-                  _selectedType = value!;
-                });
-              },
-            ),
-            const SizedBox(height: 24),
+
+            // 🔹 Tombol Selesai
             ElevatedButton.icon(
-              onPressed: _saveTransaction,
-              icon: const Icon(Icons.save),
-              label: const Text('Simpan Transaksi'),
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Selesai'),
+              onPressed: _saveAllTransactions,
               style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50),
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 40),
               ),
             ),
           ],
