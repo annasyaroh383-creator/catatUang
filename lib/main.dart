@@ -18,7 +18,7 @@ class KoenkuApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Koenku',
       theme: ThemeData(
-        primarySwatch: Colors.indigo,
+        colorSchemeSeed: Colors.indigo,
         useMaterial3: true,
       ),
       home: const MainPage(),
@@ -38,21 +38,33 @@ class _MainPageState extends State<MainPage> {
   List<Map<String, dynamic>> _transactions = [];
   double _saldo = 0.0;
 
-  /// 🔹 Load data dari SharedPreferences
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('transactions');
-    if (data != null) {
-      final loadedTransactions =
-          List<Map<String, dynamic>>.from(jsonDecode(data));
-      setState(() {
-        _transactions = loadedTransactions;
-        _saldo = _calculateSaldo(_transactions);
-      });
+    final jsonStr = prefs.getString('transactions');
+    if (jsonStr != null) {
+      try {
+        final List decoded = jsonDecode(jsonStr);
+        final loaded = decoded.cast<Map<String, dynamic>>();
+        setState(() {
+          _transactions = loaded;
+          _saldo = _calculateSaldo(_transactions);
+        });
+      } catch (_) {
+        // jika parsing gagal, kosongkan
+        setState(() {
+          _transactions = [];
+          _saldo = 0.0;
+        });
+      }
     }
   }
 
-  /// 🔹 Hitung total saldo
   double _calculateSaldo(List<Map<String, dynamic>> txs) {
     double total = 0;
     for (var tx in txs) {
@@ -66,37 +78,47 @@ class _MainPageState extends State<MainPage> {
     return total;
   }
 
-  /// 🔹 Menyimpan transaksi baru
-  Future<void> _saveTransaction(Map<String, dynamic> transaction) async {
+  /// Simpan banyak transaksi (dipanggil oleh TransactionPage)
+  Future<void> _saveTransactions(List<Map<String, dynamic>> newTxs) async {
     setState(() {
-      _transactions.add(transaction);
+      _transactions.addAll(newTxs);
       _saldo = _calculateSaldo(_transactions);
     });
-
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('transactions', jsonEncode(_transactions));
   }
 
-  /// 🔹 Inisialisasi halaman
-  @override
-  void initState() {
-    super.initState();
-    _loadData();
+  /// Update seluruh daftar transaksi (misal setelah hapus di ReportPage)
+  Future<void> _updateTransactions(List<Map<String, dynamic>> updated) async {
+    setState(() {
+      _transactions = updated;
+      _saldo = _calculateSaldo(_transactions);
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('transactions', jsonEncode(_transactions));
   }
 
-  /// 🔹 Ubah halaman ketika tap menu bawah
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
       DashboardPage(transactions: _transactions, saldo: _saldo),
-      TransactionPage(onSaveTransaction: _saveTransaction),
-      ReportPage(transactions: _transactions),
+      TransactionPage(
+        onSaveTransactions: _saveTransactions,
+        onFinish: () {
+          // setelah selesai di TransactionPage langsung ke Beranda
+          setState(() {
+            _selectedIndex = 0;
+          });
+        },
+      ),
+      ReportPage(
+        transactions: _transactions,
+        onUpdateTransactions: _updateTransactions,
+      ),
     ];
 
     return Scaffold(
